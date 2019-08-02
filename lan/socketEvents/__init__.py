@@ -5,6 +5,10 @@ fell free to modify it and share
 
 todo all types
 todo containers
+todo remove game language
+todo add test
+todo add examples
+
 """
 
 from socket import socket, AF_INET, SOCK_STREAM, SOCK_DGRAM, SOL_SOCKET, SO_REUSEADDR
@@ -13,10 +17,11 @@ import socketEvents.types as _Type
 
 
 class Event:
-    def __init__(self, player, name, **kargs):
+    def __init__(self, conn, name, **kargs):
         """the object that holds event data"""
-        self.player = player
+        self.conn = conn
         self.event_name = name
+
         for i, j in kargs.items():
             self.__setattr__(i, j)
 
@@ -24,14 +29,14 @@ class Event:
         return "<Event: " + ", ".join([i + "=" + str(j) for i, j in self.__dict__.items()]) + ">"
 
 
-class Player:
+class Connection:
     def __init__(self, conn, addr, auth=False):
         self.conn = conn
         self.addr = addr
         self.auth = auth
 
     def __repr__(self):
-        return "<Player object>"
+        return "<Connection " + str(self.addr) +">"
 
     def send(self):
         pass
@@ -71,7 +76,7 @@ class Structure:
 
 
 
-class client:
+class Client:
     def __init__(self, *args):
         """the class to send and receive data from a server
         the args must be "Structure"s defining the event types
@@ -89,15 +94,24 @@ class client:
         self.__len = len(self.__struct)
         self.__run = True
         self.__events = []
+        self.self = None
 
     def start(self):
-        """connect to the server"""
+        """try to connect to the server
+        returns true if successfully connected
+        """
         if self._socket:
             self._socket.close()
-        self._socket = socket(AF_INET, SOCK_STREAM)
-        self._socket.connect((self.ip, self.port))
+        try:
+            self._socket = socket(AF_INET, SOCK_STREAM)
+            self._socket.connect((self.ip, self.port))
+
+        except ConnectionRefusedError:
+            return False
         self.__run = True
-        Thread(target=self._conn_thread, args=(self._socket, Player(self._socket, None))).start()
+        self.self = Connection(self._socket, None)
+        Thread(target=self._conn_thread, args=(self._socket, self.self)).start()
+        return True
 
     def stop(self):
         """stop the connection"""
@@ -107,12 +121,19 @@ class client:
         """send the event "type" to the server.
         'type' must be a Structure.
         and the data must be given where the key is the event attribute and the argument is the data to be sent
+
+        return false if no connection is established
         """
         data = bytes()
         data += type._format[0].to_bytes(type._ID)
         for i, j in zip(type._format[1:], type._keys):
             data += i.to_bytes(kargs[j])
-        self._socket.send(data)
+        try:
+            self._socket.send(data)
+        except BrokenPipeError:
+            self.__events.insert(0, Event(self.self, "quit", why="unknown"))
+            return False
+        return True
 
     def events(self):
         """a generator that returns the received events"""
@@ -182,20 +203,22 @@ class client:
 
                 else:
                     self.__events.insert(0, Event(player, "quit", why="bad packet"))
-                    print(data, " bad pack")
+                    #print(data, " bad pack")
                     return
                     #  raise Exception("invalid packet id", num)
 
-class Server(client):
+class Server(Client):
     def __init__(self, *args):
         """
         the class for creating a server confection that clients can connect to
         """
-        client.__init__(self, *args)
+        Client.__init__(self, *args)
         self.conns = []
-        with socket(AF_INET, SOCK_DGRAM) as s:
+        with socket(AF_INET, SOCK_DGRAM) as s: # todo stop annoying google
             s.connect(('google.com', 80))
             self.ip = s.getsockname()[0]
+    def send(self):
+        pass # todo add
 
     def send_to(self, type, to, **kargs):
         """send data to a specific client
@@ -226,7 +249,7 @@ class Server(client):
         """look for clients to join"""
         while self.__run:
             conn, addr = self._socket.accept()
-            player = Player(conn, addr)
+            player = Connection(conn, addr)
             #self.conns[addr[1]] = conn
             self.conns.append(player)
             self.add_event(Event(player, "join"))

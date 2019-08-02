@@ -49,6 +49,8 @@ class Test(Server):
                         if "-" not in w:
                             self.send_to(win, event.player, win=True, winner=str(event.player))
                             win = False
+                    else:
+                        self.kick(event.player)
 
 
 if __name__ == "__main__":
