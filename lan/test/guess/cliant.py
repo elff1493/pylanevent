@@ -1,7 +1,6 @@
-import main2
+
 from socketEvents import *
 from socketEvents.types import *
-#from main2 import *
 from threading import Thread
 
 def send():
@@ -26,7 +25,7 @@ if __name__ == "__main__":
                          winner=str
                          )
 
-    conn = client(guess, guessed, end)
+    conn = Client(guess, guessed, end)
     conn.start()
 
     print("start game")

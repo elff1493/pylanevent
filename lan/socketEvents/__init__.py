@@ -75,7 +75,6 @@ class Structure:
             self._keys.append(i)
 
 
-
 class Client:
     def __init__(self, *args):
         """the class to send and receive data from a server
@@ -264,5 +263,5 @@ class Server(Client):
     def ban(self, player):
         """close the confection from player and block them from joining again,
         if authorisation is not set up players may be abel to join again """
-        self.kick(player)
+        self.kick(player) # todo add auth
         pass
