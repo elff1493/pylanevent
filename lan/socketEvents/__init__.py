@@ -15,12 +15,33 @@ from socket import socket, AF_INET, SOCK_STREAM, SOCK_DGRAM, SOL_SOCKET, SO_REUS
 from threading import Thread
 import socketEvents.types as _Type
 
+_PYGAMEINIT = False
+
+class PGTYPE:
+    EVENT = 1
+    JOIN = 2
+    QUIT = 3
+
+    
+def init_pyevents():
+    global _PYGAMEINIT
+    if _PYGAMEINIT:
+        return
+    _PYGAMEINIT = True
+    import pygame
+    pygame.fastevent.init()
+
+    PGTYPE.JOIN = pygame.event.custom_type()
+    PGTYPE.QUIT = pygame.event.custom_type()
+    PGTYPE.EVENT = pygame.event.custom_type()
+
 
 class Event:
-    def __init__(self, conn, name, **kargs):
+    def __init__(self, type=PGTYPE.EVENT, conn=None, event_name=None, **kargs):
         """the object that holds event data"""
+        self.type = type
         self.conn = conn
-        self.event_name = name
+        self.event_name = event_name
 
         for i, j in kargs.items():
             self.__setattr__(i, j)
@@ -36,7 +57,7 @@ class Connection:
         self.auth = auth
 
     def __repr__(self):
-        return "<Connection " + str(self.addr) +">"
+        return "<Connection " + str(self.addr) + ">"
 
     def send(self):
         pass
@@ -76,10 +97,12 @@ class Structure:
 
 
 class Client:
-    def __init__(self, *args):
+    def __init__(self, *args, use_pygame=False):
         """the class to send and receive data from a server
         the args must be "Structure"s defining the event types
         """
+        if use_pygame and not _PYGAMEINIT:
+            raise Exception("must init pyevents for this")
         self.ip = 'localhost'
         self.port = 5555
         self._socket = None
@@ -94,11 +117,20 @@ class Client:
         self.__run = True
         self.__events = []
         self.self = None
+        
+        if not use_pygame:
+            self.__event = Event
+        else:
+            import pygame
+
+            self.__event = pygame.event.Event
+            Thread(target=self.__pygame_thread).start()
 
     def start(self):
         """try to connect to the server
         returns true if successfully connected
         """
+        print("start")
         if self._socket:
             self._socket.close()
         try:
@@ -139,13 +171,17 @@ class Client:
         while self.__events:
             yield self.__events.pop()
 
-    def add_event(self, event):
-        """push an event to the event loop"""
-        if type(event) is Event:
-            self.__events.insert(0, event)
-        else:
-            raise Exception(type(event), "is not Event")
+    def add_event(self, type=PGTYPE.EVENT, **k):
+        """make and push an event to the event loop"""
+        event = self.__event(PGTYPE.EVENT, **k)
+        #print(event.type)
+        self.__events.insert(0, event)
 
+    def __pygame_thread(self):
+        from pygame import fastevent 
+        while self.__run:
+            while self.__events:
+                fastevent.post(self.__events.pop())
 
     def _conn_thread(self, conn, player):
         """the thread that gets the data from the server and adds its it to the event loop"""
@@ -156,11 +192,13 @@ class Client:
                 data = data + conn.recv(2048)  # get update
 
             except ConnectionResetError:
-                self.__events.insert(0, Event(player, "quit", why="socket fail"))
+                self.add_event(conn=player, event_name="quit", type=PGTYPE.QUIT, why="socket fail")
+                #self.__events.insert(0, Event(player, "quit", why="socket fail"))
                 return
 
             if not data:
-                self.__events.insert(0, Event(player, "quit", why="user closed"))
+                self.add_event(conn=player, event_name="quit", type=PGTYPE.QUIT, why="user closed")
+                #self.__events.insert(0, Event(player, "quit", why="user closed"))
                 return
 
             while len(data) >= 2:
@@ -195,28 +233,31 @@ class Client:
                         d = {}
                         for i, j in zip(event_struct._keys, args[1:]):
                             d[i] = j
-
-                        self.__events.insert(0, Event(player, event_struct.name, **d))
+                        self.add_event(conn=player, event_name=event_struct.name, type=PGTYPE.EVENT, **d)
+                        #self.__events.insert(0, Event(player, event_struct.name, **d))
 
 
 
                 else:
-                    self.__events.insert(0, Event(player, "quit", why="bad packet"))
+                    self.add_event(conn=player, event_name="quit", type=PGTYPE.QUIT, why="bad packet")
+                    #self.__events.insert(0, Event(player, "quit", why="bad packet"))
                     #print(data, " bad pack")
                     return
                     #  raise Exception("invalid packet id", num)
 
+
 class Server(Client):
-    def __init__(self, *args):
+    def __init__(self, *args, **kwargs):
         """
         the class for creating a server confection that clients can connect to
         """
-        Client.__init__(self, *args)
+        Client.__init__(self, *args, **kwargs)
         self.conns = []
         with socket(AF_INET, SOCK_DGRAM) as s: # todo stop annoying google
             s.connect(('google.com', 80))
             self.ip = s.getsockname()[0]
-    def send(self):
+
+    def send(self, type, **kargs):
         pass # todo add
 
     def send_to(self, type, to, **kargs):
@@ -248,10 +289,11 @@ class Server(Client):
         """look for clients to join"""
         while self.__run:
             conn, addr = self._socket.accept()
+            print("connnn")
             player = Connection(conn, addr)
             #self.conns[addr[1]] = conn
             self.conns.append(player)
-            self.add_event(Event(player, "join"))
+            self.add_event(conn=player, type=PGTYPE.JOIN, event_name="join")
             Thread(target=self._conn_thread, args=(conn, player)).start()
 
     def kick(self, player):
